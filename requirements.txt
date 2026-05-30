@@ -3,4 +3,4 @@ uvicorn
 sqlalchemy
 pyjwt
 pytest
-passlib[bcrypt]
+bcrypt

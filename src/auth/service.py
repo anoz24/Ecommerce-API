@@ -2,26 +2,37 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from dotenv import load_dotenv
 
-
 import jwt
 import time
 import os
+import bcrypt  # Replaced passlib with direct bcrypt
 
 from ..schema import users
-
-from passlib.context import CryptContext
 
 load_dotenv()
 secret = os.getenv("SECRETKEY")
 alg = "HS256"
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+# ------------ Hashing ------------- #
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Checks a plain password against a stored hash safely."""
+    try:
+        return bcrypt.checkpw(
+            plain_password.encode('utf-8'), 
+            hashed_password.encode('utf-8')
+        )
+    except (ValueError, TypeError, AttributeError):
+        # If the hash in the DB is malformed, missing, or not a string,
+        # catch the error and simply reject the login attempt.
+        return False
 
-def get_password_hash(password):
-    return pwd_context.hash(password)
+def get_password_hash(password: str) -> str:
+    """Generates a bcrypt hash for a new password."""
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+    return hashed.decode('utf-8')
+
 
 # ------------ Users ------------- #
 def fetchUserLogin(conn, email:str):
@@ -31,6 +42,7 @@ def fetchUserLogin(conn, email:str):
     return None
 
 def registerUser(conn, **kwargs):
+    # Removed the debug print statements
     kwargs["password"] = get_password_hash(kwargs["password"])
     statement = users.insert().values(**kwargs)
     result = conn.execute(statement)
@@ -52,12 +64,11 @@ def verifyJWT(token:str):
         payload = jwt.decode(token, secret, algorithms=[alg])
         return payload
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code = 401) 
+        raise HTTPException(status_code = 401, detail="Token has expired") 
     except jwt.InvalidTokenError:
-        raise HTTPException(status_code = 401)
+        raise HTTPException(status_code = 401, detail="Invalid token")
 
-
-def authLogin(conn, email:str,password:str):
+def authLogin(conn, email:str, password:str):
     userData = fetchUserLogin(conn, email)
     if not userData:
         return None
@@ -67,7 +78,7 @@ def authLogin(conn, email:str,password:str):
 
 def verifySeller(auth:str):
     user = verifyJWT(auth)
-    seller_id = user['seller_id']
-    if not seller_id : 
+    seller_id = user.get('seller_id')
+    if not seller_id: 
         raise HTTPException(status_code=403, detail="User is not a registered seller")
     return seller_id
